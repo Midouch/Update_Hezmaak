@@ -3573,6 +3573,8 @@ function updateHeader() {
 
   updateNotificationBell();
 
+  updateMessagesButton();
+
 }
 
 
@@ -5057,6 +5059,142 @@ function removeNotificationBell() {
     supabaseClient.removeChannel(notificationsChannel);
     notificationsChannel = null;
   }
+
+}
+
+
+/* =====================================================
+   ICONA MESSAGGI IN HEADER
+   (accessibile da qualsiasi pagina, come le notifiche)
+===================================================== */
+
+let messagesBadgeChannel = null;
+
+async function updateMessagesButton() {
+
+  if (!currentUser) {
+    removeMessagesButton();
+    return;
+  }
+
+  showMessagesButton();
+
+  await refreshMessagesUnreadCount();
+
+  if (messagesBadgeChannel) {
+    supabaseClient.removeChannel(messagesBadgeChannel);
+  }
+
+  messagesBadgeChannel = supabaseClient
+    .channel(`messages_badge_${currentUser.id}`)
+    .on(
+      "postgres_changes",
+      { event: "INSERT", schema: "public", table: "messages" },
+      () => {
+        refreshMessagesUnreadCount();
+      }
+    )
+    .on(
+      "postgres_changes",
+      { event: "UPDATE", schema: "public", table: "messages" },
+      () => {
+        refreshMessagesUnreadCount();
+      }
+    )
+    .subscribe();
+
+}
+
+
+function showMessagesButton() {
+
+  let button =
+    document.getElementById("messagesBellButton");
+
+  if (button) return;
+
+  button = document.createElement("button");
+  button.id = "messagesBellButton";
+  button.type = "button";
+  button.className = "icon-button notification-bell";
+  button.title = "Messaggi";
+  button.innerHTML = `
+    💬
+    <span id="messagesBadge" class="notify-badge" style="display:none"></span>
+  `;
+  button.onclick = openMessages;
+
+  const nav =
+    document.getElementById("mainNav");
+
+  if (nav) {
+
+    const bell =
+      document.getElementById("notificationBellButton");
+
+    const authButton =
+      document.getElementById("authButton");
+
+    if (bell) {
+      nav.insertBefore(button, bell);
+    } else if (authButton) {
+      nav.insertBefore(button, authButton);
+    } else {
+      nav.appendChild(button);
+    }
+
+  }
+
+}
+
+
+function removeMessagesButton() {
+
+  const button =
+    document.getElementById("messagesBellButton");
+
+  if (button) {
+    button.remove();
+  }
+
+  if (messagesBadgeChannel) {
+    supabaseClient.removeChannel(messagesBadgeChannel);
+    messagesBadgeChannel = null;
+  }
+
+}
+
+
+async function refreshMessagesUnreadCount() {
+
+  if (!currentUser) return;
+
+  const { data, error } =
+    await supabaseClient
+      .from("messages")
+      .select("*")
+      .is("read_at", null)
+      .neq("sender_id", currentUser.id);
+
+  if (error) {
+    console.warn("Errore conteggio messaggi:", error);
+    return;
+  }
+
+  refreshMessagesBadge(data ? data.length : 0);
+
+}
+
+
+function refreshMessagesBadge(count) {
+
+  const badge =
+    document.getElementById("messagesBadge");
+
+  if (!badge) return;
+
+  badge.textContent = count > 0 ? count : "";
+  badge.style.display = count > 0 ? "flex" : "none";
 
 }
 
@@ -12830,16 +12968,21 @@ async function updateUnreadCount() {
     .is("read_at", null)
     .neq("sender_id", currentUser.id);
 
+  const target = document.getElementById("unreadCount");
+
   if (error || !data) {
     console.warn("Errore unreadCount:", error);
-    document.getElementById("unreadCount").textContent = "";
+    if (target) target.textContent = "";
     return;
   }
 
   const count = data.length;
 
-  document.getElementById("unreadCount").textContent =
-    count > 0 ? `(${count})` : "";
+  if (target) {
+    target.textContent = count > 0 ? `(${count})` : "";
+  }
+
+  refreshMessagesBadge(count);
 }
 async function markMessagesAsRead(conversationId) {
   const { error } = await supabaseClient
